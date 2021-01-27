@@ -1,0 +1,239 @@
+module Main where
+
+-- Expected workflow :
+--  exporter-->apply
+--   customsMar-->confirme
+--    exporter-->send 
+--     importer-->declare
+--      customGua-->Release
+
+data Importinfo = Importinfo
+  with
+    quantity: Int
+    value: Decimal
+  deriving (Eq, Show)  
+
+data COData = COData
+  with
+    ref: Text
+    originCountry: Text
+    destinationCountry: Text
+    goodsDescription: Text
+    hsNumber: Text
+    transportInfo: Text
+    quantity: Int
+    certificateContent: Text 
+  deriving (Eq, Show)
+
+template Announcement
+  with 
+    user: Party 
+  where
+    signatory user
+
+-- invite all parties to the network 
+template Network 
+  with 
+    operator: Party -- gouvernance party
+  where 
+    signatory operator -- producteur ou operator economique
+    
+    -- create an invitation for a specific party
+    controller operator can 
+      nonconsuming InviteCustomsMar : ContractId CustomsMarInvitation
+        with 
+          customsMar: Party 
+        do create CustomsMarInvitation with ..
+    
+    controller operator can 
+      nonconsuming InviteExporter : ContractId ExporterInvitation
+        with 
+          exporter: Party 
+        do create ExporterInvitation with ..
+
+    controller operator can 
+      nonconsuming InviteImporter : ContractId ImporterInvitation
+        with 
+          importer: Party 
+        do create ImporterInvitation with ..
+
+    controller operator can 
+      nonconsuming InviteCustomsGua : ContractId CustomsGuaInvitation
+        with 
+          customsGua: Party 
+        do create CustomsGuaInvitation with ..
+
+    -- controller operator can 
+    --   nonconsuming InviteMinistryOfTrade : ContractId MinistryOfTradeInvitation
+    --     with 
+    --       ministryOfTrade: Party 
+    --     do create CustomsGuaInvitation with ..
+          
+template CustomsMarInvitation -- the invitation to join the network as Moroccan customs
+  with 
+    operator: Party 
+    customsMar: Party 
+  where
+    signatory operator 
+    controller customsMar can 
+      AcceptCustomsMarInvitation: ContractId CustomsMarRole -- the Party accept the invitation
+        do create CustomsMarRole with ..
+
+template CustomsMarRole -- Creation of the new role must be signed by the party and the opretaor
+  with
+    operator: Party 
+    customsMar: Party  
+  where 
+    signatory operator, customsMar 
+
+template CustomsGuaInvitation -- invite/create the Guatemalian customs
+  with 
+    operator: Party 
+    customsGua: Party 
+  where
+    signatory operator 
+    controller customsGua can 
+      AcceptCustomsGuaInvitation: ContractId CustomsGuaRole 
+        do create CustomsGuaRole with ..
+
+template CustomsGuaRole
+  with
+    operator: Party 
+    customsGua: Party  
+  where 
+    signatory operator, customsGua 
+
+template ImporterInvitation -- invite/create the importer
+  with 
+    operator: Party 
+    importer: Party 
+  where
+    signatory operator 
+    controller importer can 
+      AcceptImporterInvitation: ContractId ImporterRole 
+        do create ImporterRole with ..
+
+template ImporterRole
+  with
+    operator: Party 
+    importer: Party  
+  where 
+    signatory operator, importer
+
+template ExporterInvitation -- invite the exporter
+  with 
+    operator: Party 
+    exporter: Party 
+  where
+    signatory operator 
+
+    controller exporter can 
+      AcceptExporterInvitation: ContractId ExporterRole 
+        do create ExporterRole with ..
+
+template ExporterRole
+  with
+    operator: Party 
+    exporter: Party  
+  where 
+    signatory operator, exporter 
+
+    controller exporter can 
+      nonconsuming CreateCO : ContractId  CertificateOfOrigin
+        with 
+          coData: COData
+          customsMar : Party 
+        do create CertificateOfOrigin with ..
+
+template CertificateOfOrigin
+  with 
+    -- coData: COData
+    exporter: Party
+    customsMar : Party 
+  where
+    signatory exporter 
+
+    controller customsMar can 
+      ConfirmCo: ContractId InspectCertificate
+        do create InspectCertificate with coTemplate = this
+
+template InspectCertificate
+  with 
+    coTemplate: CertificateOfOrigin
+  where 
+    signatory coTemplate.customsMar
+    observer coTemplate.exporter 
+
+    controller coTemplate.exporter can 
+        SendCo: ContractId CoForImporter
+          with 
+            importer: Party 
+          do create CoForImporter with coTemplate ,importer
+
+template CoForImporter
+  with
+    coTemplate: CertificateOfOrigin
+    importer: Party
+  where 
+    signatory coTemplate.exporter
+
+    controller importer can 
+        SendImportDeclaration: ContractId ImportDeclaration
+          with 
+            customsGua: Party 
+            importinfo: Importinfo
+          do create ImportDeclaration with coTemplate, importinfo, customsGua, importer
+
+template ImportDeclaration
+  with
+    coTemplate: CertificateOfOrigin
+    customsGua: Party
+    importinfo: Importinfo
+    importer: Party
+  where 
+    signatory importer
+    observer coTemplate.exporter
+
+    controller customsGua can 
+        ReleaseCo: ContractId ReleasedCertificate
+          do create ReleasedCertificate with coTemplate, customsGua, importer
+    
+        RequestSecondConfirmation: ContractId RequestCertificate
+          do create RequestCertificate with coTemplate, customsGua,importer
+
+template RequestCertificate
+  with
+    coTemplate: CertificateOfOrigin
+    customsGua: Party
+    importer: Party
+  where 
+    signatory customsGua
+    observer coTemplate.exporter
+
+    controller coTemplate.customsMar can
+      SendThirdConfirmation: ContractId RenconciliationCertificate
+          with 
+            importinfo: Importinfo
+          do create RenconciliationCertificate with coTemplate,importer,customsGua
+
+template RenconciliationCertificate
+  with
+    coTemplate: CertificateOfOrigin
+    customsGua: Party
+    importer: Party
+  where 
+    signatory coTemplate.customsMar
+
+    controller customsGua can 
+      SendSignatoryConfirmation: ContractId ReleasedCertificate
+        do create ReleasedCertificate with coTemplate,customsGua,importer
+
+template ReleasedCertificate
+  with
+    coTemplate: CertificateOfOrigin
+    customsGua: Party
+    importer: Party
+  where 
+    signatory customsGua
+    observer coTemplate.exporter
+    observer importer

@@ -1,2 +1,3 @@
 # cosmart
-Certificate of origin
+Certificate of origin over blockchain
+Built with DAML
